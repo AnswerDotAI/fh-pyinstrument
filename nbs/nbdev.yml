@@ -1,0 +1,9 @@
+project:
+  output-dir: _docs
+
+website:
+  title: "fh-pyinstrument"
+  site-url: "https://answerdotai.github.io/fh-pyinstrument"
+  description: "FastHTML and pyinstrument made easy"
+  repo-branch: main
+  repo-url: "https://github.com/answerdotai/fh-pyinstrument"
