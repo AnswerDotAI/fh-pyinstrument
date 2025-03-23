@@ -17,7 +17,7 @@ except ImportError:
     raise ImportError('Please install pyinstrument')
 
 # %% ../nbs/00_core.ipynb 4
-class ProfileMiddleware(BaseHTTPMiddleware):
+class ProfileMiddleware(BaseHTTPMiddleware):    
     async def dispatch(self, request, call_next):
         profiling = request.query_params.get("profile", False)
         terminal = request.query_params.get("terminal", False)  
@@ -31,5 +31,3 @@ class ProfileMiddleware(BaseHTTPMiddleware):
             if html: profiler.write_html('profile.html')
             return HTMLResponse(profiler.output_html())
         return await call_next(request)
-
-# app, rt = fast_app(middleware=(Middleware(ProfileMiddleware)))
