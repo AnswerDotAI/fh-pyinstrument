@@ -5,4 +5,6 @@ d = { 'settings': { 'branch': 'main',
                 'doc_host': 'https://answerdotai.github.io',
                 'git_url': 'https://github.com/answerdotai/fh-pyinstrument',
                 'lib_path': 'fh_pyinstrument'},
-  'syms': {'fh_pyinstrument.core': {'fh_pyinstrument.core.foo': ('core.html#foo', 'fh_pyinstrument/core.py')}}}
+  'syms': { 'fh_pyinstrument.core': { 'fh_pyinstrument.core.ProfileMiddleware': ('core.html#profilemiddleware', 'fh_pyinstrument/core.py'),
+                                      'fh_pyinstrument.core.ProfileMiddleware.dispatch': ( 'core.html#profilemiddleware.dispatch',
+                                                                                           'fh_pyinstrument/core.py')}}}
