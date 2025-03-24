@@ -68,10 +68,12 @@ you can click this link:
 
 <http://127.0.0.1:5000/?profile=1>
 
+TODO add image
+
 If instead you want to have the results show up in the terminal, also
 add `term=1` to the query string. The normal web page will display in
-your browser, and the pyinstrument data will show up in limited form
-within the browser.
+your browser, and the pyinstrument view will show up in limited form
+within the terminal.
 
 <http://127.0.0.1:5000/?profile=1&term=1>
 
