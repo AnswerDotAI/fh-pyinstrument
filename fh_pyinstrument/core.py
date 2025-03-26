@@ -38,7 +38,7 @@ def instrument(route_handler):
     @functools.wraps(route_handler)
     def _wrapper(*args, **kwargs):
         # Profile the action
-        profiler = Profile()
+        profiler = Profiler()
         profiler.start()
         route_handler(*args, **kwargs)
         profiler.stop()
