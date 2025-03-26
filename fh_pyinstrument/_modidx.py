@@ -7,4 +7,5 @@ d = { 'settings': { 'branch': 'main',
                 'lib_path': 'fh_pyinstrument'},
   'syms': { 'fh_pyinstrument.core': { 'fh_pyinstrument.core.ProfileMiddleware': ('core.html#profilemiddleware', 'fh_pyinstrument/core.py'),
                                       'fh_pyinstrument.core.ProfileMiddleware.dispatch': ( 'core.html#profilemiddleware.dispatch',
-                                                                                           'fh_pyinstrument/core.py')}}}
+                                                                                           'fh_pyinstrument/core.py'),
+                                      'fh_pyinstrument.core.instrument': ('core.html#instrument', 'fh_pyinstrument/core.py')}}}
