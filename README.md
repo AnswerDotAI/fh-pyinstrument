@@ -81,6 +81,8 @@ If you want to temporarily use fh-pyinstrument on an isolated route
 handler, the `@instrument` decorator can be used:
 
 ``` python
+from fh_pyinstrument.core import instrument
+
 @rt
 @instrument
 def index(): return Titled('Hello, profiler!')
