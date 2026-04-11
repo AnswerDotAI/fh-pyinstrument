@@ -1,3 +1,30 @@
 [build-system]
-requires = ["setuptools>=64.0"]
+requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "fh-pyinstrument"
+dynamic = ["version"]
+description = "Using pyinstrument to profile FastHTML apps"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+authors = [{name = "Daniel Roy Greenfeld and Answer.AI", email = "info@fast.ai"}]
+keywords = ['nbdev', 'jupyter', 'notebook', 'python', 'fasthtml']
+classifiers = ["Natural Language :: English", "Intended Audience :: Developers", "Development Status :: 3 - Alpha", "Programming Language :: Python :: 3", "Programming Language :: Python :: 3 :: Only"]
+dependencies = ['python-fasthtml', 'pyinstrument', 'fastcore']
+
+[project.urls]
+Repository = "https://github.com/answerdotai/fh-pyinstrument"
+Documentation = "https://answerdotai.github.io/fh-pyinstrument"
+
+[project.entry-points.nbdev]
+fh_pyinstrument = "fh_pyinstrument._modidx:d"
+
+[tool.setuptools.dynamic]
+version = {attr = "fh_pyinstrument.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["fh_pyinstrument"]
+
+[tool.nbdev]
