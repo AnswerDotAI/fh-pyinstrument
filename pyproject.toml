@@ -28,3 +28,5 @@ version = {attr = "fh_pyinstrument.__version__"}
 include = ["fh_pyinstrument"]
 
 [tool.nbdev]
+allowed_metadata_keys = ['solveit']
+allowed_cell_metadata_keys = ['solveit_ai']
