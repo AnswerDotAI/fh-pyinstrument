@@ -1,0 +1,102 @@
+[
+  {
+    "objectID": "core.html",
+    "href": "core.html",
+    "title": "core",
+    "section": "",
+    "text": "Sometimes when building FastHTML apps we run into performance bottlenecks. Figuring out what is slow can be challenging, especially when building apps with async components. That’s where profiling tools like pyinstrument can help. Profilers are tools that show exactly how long each component of a project takes to run. Identifying slow parts of an app is the first step in figuring out how to make things run faster.\nimport os,time,pickle,inspect\nfrom pathlib import Path\nfrom fasthtml.common import *\nfrom starlette.middleware.base import BaseHTTPMiddleware\nfrom starlette.middleware import Middleware\nfrom functools import wraps\nfrom collections import namedtuple\nfrom contextlib import contextmanager\nfrom fastcore.basics import patch\ntry: from rich import print\nexcept: pass\n\nfrom pyinstrument import Profiler\nfrom pyinstrument.renderers import ConsoleRenderer, HTMLRenderer\nfrom pyinstrument.session import Session\nfrom starlette.testclient import TestClient\nfrom fastcore.all import *\nfrom functools import partialmethod\nfrom anyio import from_thread\ndef get_trigger_name(): return os.environ.get('PYINSTRUMENT_TRIGGER', 'profile')\nclass ProfileMiddleware(BaseHTTPMiddleware):\n    \"Add the power of pyinstrument to potentially every request.\"\n    def __init__(self, app, save_dir=None):\n        super().__init__(app)\n        self.save_dir = Path(save_dir) if save_dir else None\n\n    def _save(self, profiler):\n        if not self.save_dir: return\n        self.save_dir.mkdir(parents=True, exist_ok=True)\n        with open(self.save_dir/f'{time.time():.0f}.pkl', 'wb') as f: pickle.dump(profiler.last_session, f)\n\n    async def dispatch(self, request, call_next):\n        trigger_name = get_trigger_name()\n        should_profile = request.query_params.get(trigger_name, False)\n        term = request.query_params.get(\"term\", False)\n        if should_profile:\n            profiler = Profiler()\n            profiler.start()\n            response = await call_next(request)\n            profiler.stop()\n            self._save(profiler)\n            if term:\n                print(profiler.output_text())\n                return response\n            return HTMLResponse(profiler.output_html())\n        return await call_next(request)\n@contextmanager\ndef profiling():\n    p = Profiler()\n    p.start()\n    try: yield p\n    finally: p.stop()\ndef instrument(route_handler):\n    \"Replaces the route handler's output with pyinstrument results.\"\n    @wraps(route_handler)\n    async def _wrapper(*args, **kwargs):\n        with profiling() as p: await maybe_await(route_handler(*args, **kwargs))\n        return p.output_html()\n    return _wrapper\ndef slow(): time.sleep(0.01)\n\n@instrument\ndef my_route(): slow()\n\nres = await my_route()\nassert 'slow' in res and 'pyinstrument' in res.lower()\nres[:50]\n\n'&lt;!DOCTYPE html&gt;\\n            &lt;html&gt;\\n            &lt;he'\ndef load_session(path):\n    \"Load a saved pyinstrument session and return a renderer-ready object.\"\n    with open(path, 'rb') as f: return pickle.load(f)\napp, rt = fast_app()\napp.add_middleware(ProfileMiddleware, save_dir='/tmp/profiles')\nclient = TestClient(app)\n\n@rt\ndef index(): return Titled('Hello, profiler')\n'pyinstrumentHTMLRenderer' in client.get('/?profile=1').text\n\nTrue\nProfileEntry = namedtuple('ProfileEntry', 'time func file line')\n\ndef _matches(fp, paths): return not paths or any(p in fp for p in paths)\n\ndef _walk_frames(frame, fn, **kwargs):\n    fn(frame, **kwargs)\n    for c in frame.children: _walk_frames(c, fn, **kwargs)\n@patch\ndef flat(self:Session, paths=None, n=20):\n    \"Aggregate self-time by function, optionally filtered by file path substrings.\"\n    acc = {}\n    def _acc(frame):\n        fp,st = frame.file_path or '',frame.total_self_time\n        if st &gt; 0 and _matches(fp, paths):\n            k = (frame.function, fp, frame.line_no)\n            acc[k] = acc.get(k, 0) + st\n    _walk_frames(self.root_frame(), _acc)\n    res = sorted([ProfileEntry(t, f, fp, ln) for (f,fp,ln),t in acc.items()], key=lambda o: -o.time)\n    return res[:n]\nflat walks the frame tree and sums total_self_time per unique (function, file, line) tuple. Filter with paths to focus on specific codebases. Returns a sorted list of ProfileEntry named tuples.\nsess = load_session(sorted(Path('/tmp/profiles').glob('*.pkl'))[-1])\nfor e in sess.flat(n=5): print(f'{e.time*1000:7.1f}ms  {e.func}  {e.file}:{e.line}')\n\n    1.7ms  run_sync_in_worker_thread  \n/Users/jhoward/aai-ws/.venv/lib/python3.12/site-packages/anyio/_backends/_asyncio.py:2459\n\n\n\n    1.7ms    :None\n\n\n\n    1.0ms  getcoroutinestate  \n/Users/jhoward/.local/share/uv/python/cpython-3.12.0-macos-aarch64-none/lib/python3.12/inspect.py:1919\n\n\n\n    1.0ms    :None\n@patch\ndef callers(self:Session, func_name, paths=None, n=10):\n    \"Find which functions call `func_name` and how much time they contribute.\"\n    acc = {}\n    def _acc(frame, parent=None):\n        fp = frame.file_path or ''\n        if frame.function == func_name and frame.total_self_time &gt; 0 and parent:\n            pfp = parent.file_path or ''\n            if _matches(pfp, paths):\n                k = (parent.function, pfp, parent.line_no)\n                acc[k] = acc.get(k, 0) + frame.total_self_time\n        for c in frame.children: _acc(c, parent=frame)\n    _acc(self.root_frame())\n    res = sorted([ProfileEntry(t, f, fp, ln) for (f,fp,ln),t in acc.items()], key=lambda o: -o.time)\n    return res[:n]\ncallers answers “who is calling this hot function?”. For each occurrence of func_name with self-time, it attributes that time to the immediate parent frame.\nfor e in sess.callers('getattr', n=5): print(f'{e.time*1000:7.1f}ms  {e.func}  {e.file}:{e.line}')\n@patch\ndef callees(self:Session, func_name, paths=None, n=10):\n    \"Find what `func_name` spends its time calling.\"\n    acc = {}\n    def _acc(frame, inside=False):\n        fp = frame.file_path or ''\n        if frame.function == func_name: inside = True\n        if inside and frame.total_self_time &gt; 0 and frame.function != func_name and _matches(fp, paths):\n            k = (frame.function, fp, frame.line_no)\n            acc[k] = acc.get(k, 0) + frame.total_self_time\n        for c in frame.children: _acc(c, inside)\n    _acc(self.root_frame())\n    res = sorted([ProfileEntry(t, f, fp, ln) for (f,fp,ln),t in acc.items()], key=lambda o: -o.time)\n    return res[:n]\ncallees answers “what does this function spend its time on?”. It walks descendants of matching frames and aggregates their self-time.\nfor e in sess.callees('getattr', n=5): print(f'{e.time*1000:7.1f}ms  {e.func}  {e.file}:{e.line}')\n@patch\ndef hot_paths(self:Session, paths=None, n=10, depth=8):\n    \"Top call stacks by cumulative time, filtered to frames matching `paths`.\"\n    stacks = {}\n    def _collect(frame, stack=()):\n        fp = frame.file_path or ''\n        if _matches(fp, paths): stack = stack + (f\"{frame.function} {Path(fp).name}:{frame.line_no}\",)\n        if frame.total_self_time &gt; 0 and stack:\n            trimmed = stack[-depth:]\n            stacks[trimmed] = stacks.get(trimmed, 0) + frame.total_self_time\n        for c in frame.children: _collect(c, stack)\n    _collect(self.root_frame())\n    return sorted([(t, ' → '.join(s)) for s,t in stacks.items()], key=lambda o: -o[0])[:n]\nhot_paths shows the most expensive call stacks, collapsed to only frames matching paths. The depth parameter limits stack depth to keep output readable.\nps = ['solveit/', 'fasthtml/', 'fastcore/']\nfor t,s in sess.hot_paths(paths=ps, n=5): print(f'{t*1000:7.1f}ms  {s}')\n\n    3.4ms  _f core.py:669 → _wrap_call core.py:478 → _handle core.py:269\ndef render_session(sess, text=True, show_all=False, short_mode=True):\n    \"Render a saved session as text or html.\"\n    if text: return ConsoleRenderer(show_all=show_all, short_mode=short_mode).render(sess)\n    return HTMLRenderer(show_all=show_all).render(sess)",
+    "crumbs": [
+      "core"
+    ]
+  },
+  {
+    "objectID": "core.html#tests",
+    "href": "core.html#tests",
+    "title": "core",
+    "section": "Tests",
+    "text": "Tests\nFirst, confirm that the view works normally\n\nassert 'Hello, profiler' in client.get('/').text\n\nNow lets profile it! Or rather, check that it works.\n\n'pyinstrumentHTMLRenderer' in client.get('/?profile=1').text\n\nTrue\n\n\nLet’s print to the terminal\n\nclient.get('/?profile=1&term=1')\n\n  _     ._   __/__   _ _  _  _ _/_   Recorded: 13:41:32  Samples:  1\n /_//_/// /_\\ / //_// / //_'/ //     Duration: 0.001     CPU time: 0.001\n/   _/                      v5.1.2\n\nProfile at /var/folders/51/b2_szf2945n072c0vj2cyty40000gn/T/ipykernel_92920/363051617.py:18\n\n0.001 Handle._run  asyncio/events.py:82\n`- 0.001 coro  starlette/middleware/base.py:139\n      [9 frames hidden]  starlette\n         0.001 app  starlette/routing.py:60\n         `- 0.001 _f  ../fasthtml/fasthtml/core.py:669\n            `- 0.001 _wrap_call  ../fasthtml/fasthtml/core.py:478\n               `- 0.001 _handle  ../fasthtml/fasthtml/core.py:269\n                  `- 0.001 run_in_threadpool  starlette/concurrency.py:30\n                     `- 0.001 run_sync  anyio/to_thread.py:25\n                        `- 0.001 AsyncIOBackend.run_sync_in_worker_thread  anyio/_backends/_asyncio.py:2459\n                           `- 0.001   anyio/_backends/_asyncio.py\n\n\n\n\n\n&lt;Response [200 OK]&gt;\n\n\n\n@rt\n@instrument\ndef saxaphone(): return Titled('Play that sweet horn')\nassert 'pyinstrumentHTMLRenderer' in client.get('/saxaphone').text\n\n\n@rt\n@instrument\nasync def trombone(): return Titled('Async horn')\nassert 'pyinstrumentHTMLRenderer' in client.get('/trombone').text",
+    "crumbs": [
+      "core"
+    ]
+  },
+  {
+    "objectID": "index.html",
+    "href": "index.html",
+    "title": "fh-pyinstrument",
+    "section": "",
+    "text": "Sometimes when building FastHTML apps we run into performance bottlenecks. Figuring out what is slow can be challenging, especially when building apps with async components. That’s where profiling tools like pyinstrument can help. Profilers are tools that show exactly how long each component of a project takes to run. Identifying slow parts of an app is the first step in figuring out how to make things run faster.",
+    "crumbs": [
+      "fh-pyinstrument"
+    ]
+  },
+  {
+    "objectID": "index.html#how-to-install",
+    "href": "index.html#how-to-install",
+    "title": "fh-pyinstrument",
+    "section": "How to install",
+    "text": "How to install\nInstall from PyPI:\npip install fh-pyinstrument",
+    "crumbs": [
+      "fh-pyinstrument"
+    ]
+  },
+  {
+    "objectID": "index.html#how-to-configure",
+    "href": "index.html#how-to-configure",
+    "title": "fh-pyinstrument",
+    "section": "How to configure",
+    "text": "How to configure\nThe easiest way is to import the ProfileMiddleware into your project and add it to your app’s list of Middleware via the app.add_middleware() method:\nfrom fasthtml.common import *\nfrom fh_pyinstrument import ProfileMiddleware\n\napp, rt = fast_app()\napp.add_middleware(ProfileMiddleware, save_dir='/tmp/profiles')\n\n@rt\ndef index(): return Titled('Hello, profiler!')\n\nserve()\nIf you want to add it to the project when fast_app() is declared, you’ll need to run it through Starlette’s middleware pre-processor:\nfrom starlette.middleware import Middleware\n\napp, rt = fast_app(middleware=(Middleware(ProfileMiddleware)))\n\n@rt\ndef index(): return Titled('Hello, profiler!')\n\nserve()\nIf you want to change the querypath trigger key from profile to something else, set the desired value to PYINSTRUMENT_TRIGGER.\nexport PYINSTRUMENT_TRIGGER=instrument\nNow this will trigger the report:\nhttps://localhost:5001/?instrument=1",
+    "crumbs": [
+      "fh-pyinstrument"
+    ]
+  },
+  {
+    "objectID": "index.html#how-to-use-the-middleware",
+    "href": "index.html#how-to-use-the-middleware",
+    "title": "fh-pyinstrument",
+    "section": "How to use the middleware",
+    "text": "How to use the middleware\nSimply add ?profile=1 to any url, that will cause the app to display an amazing chart set in the browser. In the example above, run it and click this link:\nhttp://127.0.0.1:5000/?profile=1\nIf instead you want to have the results show up in the terminal, also add term=1 to the query string. The normal web page will display in your browser, and the pyinstrument view will show up in limited form within the terminal.",
+    "crumbs": [
+      "fh-pyinstrument"
+    ]
+  },
+  {
+    "objectID": "index.html#how-to-use-the-stand-alone-instrument-decorator",
+    "href": "index.html#how-to-use-the-stand-alone-instrument-decorator",
+    "title": "fh-pyinstrument",
+    "section": "How to use the stand-alone @instrument decorator",
+    "text": "How to use the stand-alone @instrument decorator\nIf you want to temporarily use fh-pyinstrument on an isolated route handler, the @instrument decorator can be used. This triggers on any call to the affected route, isn’t triggered by the `?profile=1” query value.\nfrom fh_pyinstrument import instrument\n\n@rt\n@instrument\ndef index(): return Titled('Hello, profiler!')",
+    "crumbs": [
+      "fh-pyinstrument"
+    ]
+  },
+  {
+    "objectID": "index.html#saving-and-analysing-sessions",
+    "href": "index.html#saving-and-analysing-sessions",
+    "title": "fh-pyinstrument",
+    "section": "Saving and analysing sessions",
+    "text": "Saving and analysing sessions\nPass save_dir to the middleware to pickle each profiled request’s session to disk:\napp.add_middleware(ProfileMiddleware, save_dir='/tmp/profiles')\nEach request with ?profile=1 now saves a .pkl file alongside the HTML view. Load it later for analysis:\nfrom pathlib import Path\nfrom fh_pyinstrument import load_session, render_session\n\nsess = load_session(sorted(Path('/tmp/profiles').glob('*.pkl'))[-1])\nprint(render_session(sess))\nrender_session returns console text by default (with show_all=False, short_mode=True). Pass text=False for HTML output.",
+    "crumbs": [
+      "fh-pyinstrument"
+    ]
+  },
+  {
+    "objectID": "index.html#programmatic-analysis",
+    "href": "index.html#programmatic-analysis",
+    "title": "fh-pyinstrument",
+    "section": "Programmatic analysis",
+    "text": "Programmatic analysis\nSessions have four analysis methods patched in. All accept an optional paths list to filter by file path substrings (e.g. ['myapp/', 'fasthtml/']) and n to limit results.\nsess.flat(paths, n) — Which functions have the most self-time?\nsess.flat(paths=['myapp/'], n=10)\n# [ProfileEntry(time=0.287, func='_to_xml', file='fastcore/xml.py', line=177),\n#  ProfileEntry(time=0.115, func='_get_deps', file='myapp/db.py', line=525), ...]\nsess.callers(func_name, paths, n) — Who’s calling this hot function?\nsess.callers('ft_html')\n# Shows which functions call ft_html and how much time they contribute\nsess.callees(func_name, paths, n) — What does a function spend its time on?\nsess.callees('MsgButtons', paths=['myapp/', 'fasthtml/'], n=5)\n# Shows the most expensive functions called inside MsgButtons\nsess.hot_paths(paths, n, depth) — Most expensive call stacks, collapsed to matching frames:\nfor t, s in sess.hot_paths(paths=['myapp/'], n=5):\n    print(f'{t*1000:.1f}ms  {s}')\n# 245.0ms  dialog_ core.py:2236 → chat core.py:2206 → MessageCard cards.py:249 → _to_xml xml.py:177",
+    "crumbs": [
+      "fh-pyinstrument"
+    ]
+  },
+  {
+    "objectID": "index.html#quick-reference-pyinstruments-session-frame",
+    "href": "index.html#quick-reference-pyinstruments-session-frame",
+    "title": "fh-pyinstrument",
+    "section": "Quick reference: pyinstrument’s Session / Frame",
+    "text": "Quick reference: pyinstrument’s Session / Frame\nA Session contains a tree of Frame objects. The key attributes on Frame:\n\n\n\nAttribute\nDescription\n\n\n\n\nfunction\nFunction name\n\n\nfile_path\nAbsolute path to source file\n\n\nline_no\nLine number\n\n\nchildren\nList of child frames\n\n\ntime\nTotal time including children\n\n\ntotal_self_time\nTime in this function only (excluding children)\n\n\nabsorbed_time\nTime hidden by pyinstrument’s grouping\n\n\nis_application_code\nWhether pyinstrument considers this app code\n\n\n\nWalking the tree manually:\nfrom pyinstrument.session import Session\n\nsess = load_session('profile.pkl')\nroot = sess.root_frame()\nprint(f'Duration: {sess.duration:.2f}s')\n\ndef walk(frame, depth=0):\n    if frame.total_self_time &gt; 0.01:\n        print(f'{\"  \"*depth}{frame.total_self_time*1000:.0f}ms  {frame.function}  {frame.file_path}:{frame.line_no}')\n    for c in frame.children: walk(c, depth+1)\n\nwalk(root)\nYou can also render a session directly without going through Profiler:\nfrom pyinstrument.renderers import ConsoleRenderer, HTMLRenderer\n\nprint(ConsoleRenderer(show_all=False, short_mode=True).render(sess))",
+    "crumbs": [
+      "fh-pyinstrument"
+    ]
+  }
+]
